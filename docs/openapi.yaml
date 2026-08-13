@@ -1,0 +1,272 @@
+openapi: 3.0.3
+info:
+  title: PicPay Simplificado
+  description: >
+    API de transferências entre usuários e lojistas. `POST /transfer` é o único endpoint
+    avaliado pelo desafio; os demais existem para tornar esse fluxo demonstrável de ponta a
+    ponta (ver readme.md).
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8080
+
+tags:
+  - name: transfer
+    description: O fluxo avaliado pelo desafio
+  - name: users
+    description: Cadastro e consulta (fora do escopo avaliado)
+  - name: observability
+
+paths:
+  /transfer:
+    post:
+      tags: [transfer]
+      summary: Transfere dinheiro de um usuário comum para outro usuário ou lojista
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+            example:
+              value: 100.0
+              payer: 4
+              payee: 15
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >
+            Se repetido dentro de 24h, retorna a resposta da primeira chamada em vez de
+            processar a transferência de novo.
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Transferência concluída
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '403':
+          description: Lojista tentando enviar dinheiro, ou autorizador externo negou/indisponível
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: payer ou payee não existe
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Saldo insuficiente, valor inválido, auto-transferência, ou validação de campos
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Rate limit excedido (30 req/min por IP)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /users:
+    post:
+      tags: [users]
+      summary: Cadastra um usuário comum ou lojista (não avaliado pelo desafio)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterUserRequest'
+      responses:
+        '201':
+          description: Usuário criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '409':
+          description: E-mail ou documento já cadastrado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: CPF/CNPJ inválido ou campos ausentes/mal formados
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /users/{id}:
+    get:
+      tags: [users]
+      summary: Consulta um usuário (inclui saldo)
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Usuário encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          description: Usuário não encontrado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /users/{id}/deposit:
+    post:
+      tags: [users]
+      summary: Deposita saldo na carteira (proposta própria, não avaliada — ver readme.md)
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value:
+                  type: number
+                  format: float
+                  exclusiveMinimum: true
+                  minimum: 0
+      responses:
+        '200':
+          description: Saldo atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          description: Usuário não encontrado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /health/live:
+    get:
+      tags: [observability]
+      summary: Liveness probe
+      responses:
+        '200':
+          description: Processo de pé
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /health/ready:
+    get:
+      tags: [observability]
+      summary: Readiness probe (PostgreSQL e Redis)
+      responses:
+        '200':
+          description: Pronto para tráfego
+        '503':
+          description: PostgreSQL ou Redis inacessível
+
+  /metrics:
+    get:
+      tags: [observability]
+      summary: Métricas no formato de exposição do Prometheus
+      responses:
+        '200':
+          description: Texto Prometheus
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+
+  schemas:
+    TransferRequest:
+      type: object
+      required: [value, payer, payee]
+      properties:
+        value:
+          type: number
+          format: float
+          exclusiveMinimum: true
+          minimum: 0
+          example: 100.0
+        payer:
+          type: integer
+          example: 4
+        payee:
+          type: integer
+          example: 15
+
+    Transaction:
+      type: object
+      properties:
+        id: { type: integer, example: 42 }
+        status: { type: string, enum: [completed], example: completed }
+        value: { type: string, example: "100.00" }
+        payer: { type: integer, example: 4 }
+        payee: { type: integer, example: 15 }
+        createdAt: { type: string, format: date-time }
+
+    RegisterUserRequest:
+      type: object
+      required: [fullName, document, email, password, type]
+      properties:
+        fullName: { type: string, minLength: 3, maxLength: 180, example: "Ana Silva" }
+        document: { type: string, description: "CPF ou CNPJ, com ou sem máscara", example: "529.982.247-25" }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        type: { type: string, enum: [common, merchant] }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        fullName: { type: string, example: "Ana Silva" }
+        email: { type: string, format: email }
+        document: { type: string, example: "52998224725" }
+        documentType: { type: string, enum: [cpf, cnpj] }
+        type: { type: string, enum: [common, merchant] }
+        balance: { type: string, example: "500.00" }
+        createdAt: { type: string, format: date-time }
+
+    Problem:
+      description: RFC 7807 problem+json — formato de todo erro retornado pela API
+      type: object
+      properties:
+        type: { type: string, example: "about:blank" }
+        title:
+          type: string
+          description: Slug estável, adequado para tratamento programático (não muda entre idiomas/versões)
+          example: insufficient_funds
+        status: { type: integer, example: 422 }
+        detail: { type: string, example: "User #4 does not have enough balance for this transfer." }
+        violations:
+          type: array
+          description: Presente apenas quando title=validation_failed
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
