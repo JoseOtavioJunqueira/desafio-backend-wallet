@@ -1,0 +1,19 @@
+# Loaded only when APP_ENV=test (see src/Kernel.php's MicroKernelTrait::configureContainer).
+#
+# The real authorizer/notifier are live external services: randomized responses and network
+# calls have no place in an automated test suite. Both are swapped for deterministic
+# in-memory fakes here so tests exercise *our* logic, not the mock's uptime or dice roll.
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        public: true # tests fetch these directly via static::getContainer()->get(...)
+
+    App\Tests\Fakes\FakeAuthorizerGateway:
+        arguments:
+            $authorized: true
+
+    App\Tests\Fakes\FakeNotifier: ~
+
+    App\Application\Port\AuthorizerGatewayInterface: '@App\Tests\Fakes\FakeAuthorizerGateway'
+    App\Application\Port\NotifierInterface: '@App\Tests\Fakes\FakeNotifier'
