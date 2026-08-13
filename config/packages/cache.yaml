@@ -1,0 +1,18 @@
+framework:
+    cache:
+        prefix_seed: picpay-simplificado
+
+        app: cache.adapter.redis
+        default_redis_provider: '%env(REDIS_URL)%'
+
+        pools:
+            # Backs App\Infrastructure\Idempotency\IdempotencyGuard: caches the response for a
+            # given `Idempotency-Key` header on POST /transfer so a client retrying a timed-out
+            # request never risks sending money twice.
+            cache.idempotency:
+                adapter: cache.adapter.redis
+                default_lifetime: 86400
+
+            # Basic rate limiting on POST /transfer (config/packages/rate_limiter.yaml).
+            cache.rate_limiter:
+                adapter: cache.adapter.redis

@@ -1,0 +1,97 @@
+# yaml-language-server: $schema=../vendor/symfony/dependency-injection/Loader/schema/services.schema.json
+
+# This file is the entry point to configure your own services.
+# Files in the packages/ subdirectory configure your dependencies.
+# See also https://symfony.com/doc/current/service_container/import.html
+
+parameters:
+
+services:
+    # default configuration for services in *this* file
+    _defaults:
+        autowire: true      # Automatically injects dependencies in your services.
+        autoconfigure: true # Automatically registers your services as commands, event subscribers, etc.
+        bind:
+            bool $debug: '%kernel.debug%'
+
+    # makes classes in src/ available to be used as services
+    # this creates a service per class whose id is the fully-qualified class name
+    # Plain data holders (entities, value objects, exceptions, commands, DTOs) are excluded
+    # below: they have constructors that take scalars/business values, not injectable
+    # services, and were never meant to be looked up from the container — only `new`'d up by
+    # the code that owns them. Everything else under src/ (use cases, repositories,
+    # gateways, controllers, message handlers, TransferPolicy, ...) is registered normally.
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/Kernel.php'
+            - '../src/Domain/Model/'
+            - '../src/Domain/ValueObject/'
+            - '../src/Domain/Exception/'
+            - '../src/Application/UseCase/*/*Command.php'
+            - '../src/Infrastructure/Notification/NotifyPayeeMessage.php'
+            - '../src/Infrastructure/Idempotency/StoredResponse.php'
+            - '../src/Http/Request/'
+            - '../src/Http/Response/'
+
+    # ---------------------------------------------------------------------------------
+    # Hexagonal wiring: bind every Application/Domain port to its one Infrastructure
+    # adapter. Kept explicit (rather than relying on "only one class implements this
+    # interface" autowiring) so the composition root is readable in one place.
+    # ---------------------------------------------------------------------------------
+    App\Domain\Repository\UserRepositoryInterface: '@App\Infrastructure\Persistence\Doctrine\DoctrineUserRepository'
+    App\Domain\Repository\TransactionRepositoryInterface: '@App\Infrastructure\Persistence\Doctrine\DoctrineTransactionRepository'
+    App\Application\Port\TransactionManagerInterface: '@App\Infrastructure\Persistence\Doctrine\DoctrineTransactionManager'
+    App\Application\Port\AuthorizerGatewayInterface: '@App\Infrastructure\Http\Authorizer\HttpAuthorizerGateway'
+    App\Application\Port\NotifierInterface: '@App\Infrastructure\Notification\AsyncNotifier'
+    App\Application\Port\PasswordHasherInterface: '@App\Infrastructure\Security\NativePasswordHasher'
+
+    # ---------------------------------------------------------------------------------
+    # HTTP clients for the two external mocks. Both hosts serve an expired TLS
+    # certificate (verified 2026-08-12 — see docs/adr/0004-external-mocks-tls.md), so
+    # peer/host verification is disabled *only* for these two named clients, never for
+    # the framework's default HttpClient. Short timeouts + RetryableHttpClient keep a
+    # slow/flaky mock from ever stalling a request for long.
+    # ---------------------------------------------------------------------------------
+    app.http_client.authorizer.base:
+        class: Symfony\Contracts\HttpClient\HttpClientInterface
+        factory: ['Symfony\Component\HttpClient\HttpClient', 'create']
+        arguments:
+            $defaultOptions:
+                base_uri: '%env(AUTHORIZER_URL)%'
+                verify_peer: false
+                verify_host: false
+                timeout: 3
+                max_duration: 5
+
+    app.http_client.authorizer:
+        class: Symfony\Component\HttpClient\RetryableHttpClient
+        arguments:
+            $client: '@app.http_client.authorizer.base'
+            $strategy: null
+            $maxRetries: 2
+
+    app.http_client.notification.base:
+        class: Symfony\Contracts\HttpClient\HttpClientInterface
+        factory: ['Symfony\Component\HttpClient\HttpClient', 'create']
+        arguments:
+            $defaultOptions:
+                base_uri: '%env(NOTIFICATION_URL)%'
+                verify_peer: false
+                verify_host: false
+                timeout: 3
+                max_duration: 5
+
+    app.http_client.notification:
+        class: Symfony\Component\HttpClient\RetryableHttpClient
+        arguments:
+            $client: '@app.http_client.notification.base'
+            $strategy: null
+            $maxRetries: 2
+
+    # Raw Redis client (distinct from the Symfony Cache pools above) used where atomic INCR
+    # counters are simpler than the PSR-6 cache API — see App\Infrastructure\Metrics\MetricsRecorder.
+    app.redis_client:
+        class: Predis\Client
+        arguments:
+            - '%env(REDIS_URL)%'

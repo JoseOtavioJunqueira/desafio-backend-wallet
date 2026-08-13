@@ -1,0 +1,31 @@
+framework:
+    messenger:
+        failure_transport: failed
+
+        transports:
+            # Doctrine-backed queue: survives worker restarts and is inspectable via SQL
+            # (`SELECT * FROM messenger_messages`) without adding RabbitMQ/Redis-as-broker to
+            # the stack just for one message type. Run with:
+            #   bin/console messenger:consume async -vv
+            async:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                retry_strategy:
+                    # The notification mock is explicitly documented as unstable: retry with
+                    # exponential backoff before giving up and routing to `failed`.
+                    max_retries: 5
+                    delay: 1000
+                    multiplier: 3
+                    max_delay: 60000
+            failed: 'doctrine://default?queue_name=failed'
+            sync: 'sync://'
+
+        routing:
+            'App\Infrastructure\Notification\NotifyPayeeMessage': async
+
+when@test:
+    framework:
+        messenger:
+            transports:
+                # Synchronous in tests: notification side-effects are asserted immediately,
+                # no worker process needed in the test suite.
+                async: 'in-memory://'
