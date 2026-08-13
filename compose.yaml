@@ -1,0 +1,74 @@
+services:
+  app:
+    build:
+      context: .
+      target: dev
+    ports:
+      - "8080:80"
+    volumes:
+      - .:/app:cached
+      - vendor_data:/app/vendor
+      - var_data:/app/var
+    depends_on:
+      database:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks: [picpay]
+
+  # Consumes the `async` transport (payee notifications). A separate container/process from
+  # `app` on purpose: a slow/misbehaving notification burst degrades the worker queue depth,
+  # never the HTTP request path.
+  worker:
+    build:
+      context: .
+      target: dev
+    command: ["php", "bin/console", "messenger:consume", "async", "-vv", "--time-limit=3600", "--memory-limit=128M"]
+    volumes:
+      - .:/app:cached
+      - vendor_data:/app/vendor
+      - var_data:/app/var
+    depends_on:
+      database:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    networks: [picpay]
+    restart: unless-stopped
+
+  database:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: picpay_simplificado
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # exposed for local psql/DBeaver only; the app talks to it over `picpay`
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d picpay_simplificado"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [picpay]
+
+  cache:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks: [picpay]
+
+volumes:
+  db_data:
+  vendor_data:
+  var_data:
+
+networks:
+  picpay:
