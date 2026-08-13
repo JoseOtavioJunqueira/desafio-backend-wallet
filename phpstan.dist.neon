@@ -1,0 +1,16 @@
+parameters:
+    level: max
+    paths:
+        - src
+    tmpDir: var/cache/phpstan
+
+    excludePaths:
+        - src/Kernel.php
+
+    checkMissingCallableSignature: true
+    treatPhpDocTypesAsCertain: false
+
+includes:
+    - vendor/phpstan/phpstan-symfony/extension.neon
+    - vendor/phpstan/phpstan-doctrine/extension.neon
+    - vendor/phpstan/phpstan-doctrine/rules.neon
