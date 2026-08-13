@@ -1,0 +1,10 @@
+framework:
+    rate_limiter:
+        # Generous enough not to interfere with normal/test traffic, tight enough to blunt a
+        # naive retry loop or script hammering the one endpoint that moves money. Keyed by
+        # client IP in App\Http\Controller\TransferController.
+        transfer:
+            policy: 'sliding_window'
+            limit: 30
+            interval: '1 minute'
+            cache_pool: 'cache.rate_limiter'
